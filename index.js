@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 const app = express();
 app.use(express.json());
 
-const DISCORD_WEBHOOK = "https://discord.com/api/webhooks/...";
+const DISCORD_WEBHOOK = "https://discordapp.com/api/webhooks/1406862442369253386/y5HCNp40yFGPhsDK85JC4JYB4p8KHTaaqPLp8vcOaPVPxr5qLM-7l3OjzGiKz2FJcxqe";
 
 app.post("/github", async (req, res) => {
   const payload = req.body;
