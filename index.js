@@ -1,113 +1,158 @@
 import express from "express";
-import fetch from "node-fetch";
+import axios from "axios";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-const DISCORD_WEBHOOK = "https://discordapp.com/api/webhooks/1406862442369253386/y5HCNp40yFGPhsDK85JC4JYB4p8KHTaaqPLp8vcOaPVPxr5qLM-7l3OjzGiKz2FJcxqe";
-
-
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
 
 app.post("/github", async (req, res) => {
   try {
+    const event = req.headers["x-github-event"];
     const payload = req.body;
 
-    // Lấy commit mới nhất
-    const commit = payload.head_commit;
+    let embed = null;
 
-    if (!commit) {
-      return res.status(400).send("No commit data");
+    switch (event) {
+
+      // =========================
+      // PUSH EVENT
+      // =========================
+      case "push": {
+        const commit = payload.head_commit;
+
+        if (!commit) {
+          return res.status(400).send("No commit data");
+        }
+
+        const branch = payload.ref.replace("refs/heads/", "");
+
+        embed = {
+          title: `📦 ${payload.repository.full_name}`,
+          url: payload.repository.html_url,
+          color: 0x7289da,
+
+          fields: [
+            {
+              name: "🌿 Branch",
+              value: branch,
+              inline: true
+            },
+            {
+              name: "🆔 Commit",
+              value: commit.id.substring(0, 7),
+              inline: true
+            },
+            {
+              name: "✍️ Author",
+              value: commit.author.name,
+              inline: true
+            },
+            {
+              name: "📝 Message",
+              value: commit.message
+            },
+            {
+              name: "📊 Changes",
+              value:
+                `+${commit.added.length} ` +
+                `~${commit.modified.length} ` +
+                `-${commit.removed.length}`
+            },
+            {
+              name: "🔗 Commit",
+              value: `[View Commit](${commit.url})`
+            }
+          ],
+
+          timestamp: commit.timestamp
+        };
+
+        break;
+      }
+
+      // =========================
+      // MEMBER EVENT
+      // =========================
+      case "member": {
+        embed = {
+          title: "👥 Repository Member Update",
+          color: payload.action === "added"
+            ? 0x57f287
+            : 0xed4245,
+
+          description:
+            payload.action === "added"
+              ? `✅ **${payload.member.login}** joined repository`
+              : `❌ **${payload.member.login}** removed from repository`,
+
+          fields: [
+            {
+              name: "📦 Repository",
+              value: payload.repository.full_name
+            }
+          ]
+        };
+
+        break;
+      }
+
+      // =========================
+      // CREATE EVENT
+      // =========================
+      case "create": {
+
+        if (payload.ref_type !== "branch") {
+          return res.status(200).send("Ignored");
+        }
+
+        embed = {
+          title: "🌱 New Branch Created",
+          color: 0xf1c40f,
+
+          fields: [
+            {
+              name: "📦 Repository",
+              value: payload.repository.full_name
+            },
+            {
+              name: "🌿 Branch",
+              value: payload.ref
+            }
+          ]
+        };
+
+        break;
+      }
+
+      // =========================
+      // DEFAULT
+      // =========================
+      default: {
+        return res.status(200).send("Unhandled event");
+      }
     }
 
-    // Format data
-    const repoName = payload.repository.name;
-    const repoUrl = payload.repository.html_url;
-    const branch = payload.ref.replace("refs/heads/", "");
-    const message = commit.message;
-    const author = commit.author.name;
-    const commitUrl = commit.url;
-    const timestamp = commit.timestamp;
-    const commitId = commit.id.substring(0, 7);
+    // Send Discord webhook
+    await axios.post(DISCORD_WEBHOOK, {
+      embeds: [embed]
+    });
 
-    // File stats
-    const added = commit.added.length;
-    const removed = commit.removed.length;
-    const modified = commit.modified.length;
-
-    // Discord embed
-    const embed = {
-      title: `📦 ${repoName}`,
-      url: repoUrl,
-      color: 0x7289da,
-      fields: [
-        { name: "🌿 Branch", value: branch, inline: true },
-        { name: "🆔 Commit", value: commitId, inline: true },
-        { name: "✍️ Author", value: author, inline: true },
-        { name: "📝 Message", value: message },
-        { name: "🔗 Link", value: `[View Commit](${commitUrl})` },
-        { name: "📊 Changes", value: `+${added} / ~${modified} / -${removed}` },
-        { name: "⏰ Time", value: timestamp }
-      ]
-    };
-
-    // Gửi sang Discord
-    await axios.post(DISCORD_WEBHOOK, { embeds: [embed] });
+    console.log(`[${event}] sent to Discord`);
 
     res.status(200).send("OK");
+
   } catch (err) {
-    console.error(err.message);
-    res.status(500).send("Error");
+
+    console.error("Webhook Error:", err.message);
+
+    res.status(500).send("Internal Server Error");
   }
 });
 
-
-app.post("/webhook", (req, res) => {
-  const event = req.headers["x-github-event"]; // GitHub gửi event type trong header
-  const payload = req.body;
-
-  let msg = "";
-
-  switch (event) {
-    case "push": {
-      const commit = payload.head_commit;
-      msg = `
-📌 **Push Event**
-Repo: ${payload.repository.full_name}
-Branch: ${payload.ref.replace("refs/heads/", "")}
-Commit: ${commit.id.substring(0, 7)}
-Message: ${commit.message}
-Author: ${commit.author.name}
-URL: ${commit.url}
-Timestamp: ${commit.timestamp}
-Files changed: +${commit.added.length}, ~${commit.modified.length}, -${commit.removed.length}
-      `;
-      break;
-    }
-
-    case "member": {
-      const action = payload.action;
-      const member = payload.member.login;
-      if (action === "added") {
-        msg = `✅ **Thêm thành viên**: ${member} đã được thêm vào repo ${payload.repository.full_name}`;
-      } else if (action === "removed") {
-        msg = `❌ **Xóa thành viên**: ${member} đã bị xóa khỏi repo ${payload.repository.full_name}`;
-      }
-      break;
-    }
-
-    case "create": {
-      if (payload.ref_type === "branch") {
-        msg = `🌱 **Tạo branch mới**: ${payload.ref} trong repo ${payload.repository.full_name}`;
-      }
-      break;
-    }
-
-    default:
-      msg = `🤷‍♂️ Chưa xử lý event: ${event}`;
-  }
-
-  console.log(msg); // log ra console
-  res.status(200).send("OK");
+app.listen(3000, () => {
+  console.log("Server listening on port 3000");
 });
-
-app.listen(3000, () => console.log("Listening on port 3000"));
